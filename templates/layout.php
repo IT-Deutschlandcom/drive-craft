@@ -15,8 +15,9 @@ function render_header(string $title, string $page): void
   <title><?= e($title) ?> · Drive-Craft-3D</title>
   <script src="assets/js/theme.js"></script>
   <link rel="icon" type="image/svg+xml" href="assets/images/keychain.svg">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <link href="assets/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
   <link href="assets/css/style.css" rel="stylesheet">
+  <noscript><style>.main-nav{display:flex}.mobile-toggle{display:none}</style></noscript>
 </head>
 <body>
 <a class="visually-hidden-focusable" href="#main">Zum Inhalt springen</a>

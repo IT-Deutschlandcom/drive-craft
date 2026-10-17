@@ -31,13 +31,14 @@ function email_input(): string
         throw new DomainException('Bitte gib eine gültige E-Mail-Adresse ein.');
     }
 
-    function require_consent(string $field, string $message): void
-    {
-        if (($_POST[$field] ?? null) !== '1') {
-            throw new DomainException($message);
-        }
-    }
     return $email;
+}
+
+function require_consent(string $field, string $message): void
+{
+    if (($_POST[$field] ?? null) !== '1') {
+        throw new DomainException($message);
+    }
 }
 
 function strong_password(string $password): bool

@@ -206,28 +206,28 @@ function cart_items(): array
             $item['line_total'] = (int) $item['price_cents'] * $item['quantity'];
             $items[] = $item;
         }
-
-        function synchronize_paid_cart(): void
-        {
-            $id = (int) ($_SESSION['checkout_order_id'] ?? 0);
-            if (!config('db.name') || !$id || empty($_SESSION['user_id'])) {
-                return;
-            }
-            $order = query('SELECT payment_status FROM orders WHERE id=? AND user_id=?', [$id, $_SESSION['user_id']])->fetch();
-            if ($order && $order['payment_status'] === 'paid') {
-                foreach (query('SELECT product_id,quantity FROM order_items WHERE order_id=?', [$id])->fetchAll() as $item) {
-                    $left = (int) ($_SESSION['cart'][$item['product_id']] ?? 0) - (int) $item['quantity'];
-                    if ($left > 0) {
-                        $_SESSION['cart'][$item['product_id']] = $left;
-                    } else {
-                        unset($_SESSION['cart'][$item['product_id']]);
-                    }
-                }
-                unset($_SESSION['checkout_order_id']);
-            }
-        }
     }
     return $items;
+}
+
+function synchronize_paid_cart(): void
+{
+    $id = (int) ($_SESSION['checkout_order_id'] ?? 0);
+    if (!config('db.name') || !$id || empty($_SESSION['user_id'])) {
+        return;
+    }
+    $order = query('SELECT payment_status FROM orders WHERE id=? AND user_id=?', [$id, $_SESSION['user_id']])->fetch();
+    if ($order && $order['payment_status'] === 'paid') {
+        foreach (query('SELECT product_id,quantity FROM order_items WHERE order_id=?', [$id])->fetchAll() as $item) {
+            $left = (int) ($_SESSION['cart'][$item['product_id']] ?? 0) - (int) $item['quantity'];
+            if ($left > 0) {
+                $_SESSION['cart'][$item['product_id']] = $left;
+            } else {
+                unset($_SESSION['cart'][$item['product_id']]);
+            }
+        }
+        unset($_SESSION['checkout_order_id']);
+    }
 }
 
 function cart_count(): int

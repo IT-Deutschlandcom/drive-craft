@@ -18,10 +18,11 @@ function invoice_pdf(array $order): string
         ...preg_split('/\R/u', (string) $order['seller_address']),
         'Steuernummer / USt-IdNr.: ' . $order['seller_tax_id'],
         '',
-        'RECHNUNG ' . $order['order_number'],
+        'VORAUSZAHLUNGSRECHNUNG ' . $order['order_number'],
         'Rechnungsdatum: ' . gmdate('d.m.Y', strtotime($order['paid_at'] . ' UTC')),
         'Bestelldatum: ' . gmdate('d.m.Y', strtotime($order['created_at'] . ' UTC')),
-        'Leistungsdatum: siehe Versandbestaetigung / Lieferschein',
+        'Leistungs-/Lieferdatum: zum Rechnungsdatum noch nicht erfolgt.',
+        'Vorauszahlung; das tatsaechliche Lieferdatum dokumentiert der Lieferschein.',
         '',
         'Rechnungsempfaenger:',
         $order['shipping_name'], $order['address1'],
@@ -97,6 +98,80 @@ function invoice_pdf(array $order): string
     return $pdf . 'trailer << /Size ' . (count($objects) + 1) . " /Root 1 0 R >>\nstartxref\n" . $xref . "\n%%EOF\n";
 }
 
+function invoice_archive_path(array $order): string
+{
+    $private = realpath((string) config('app.private_dir', ''));
+    $root = realpath(APP_ROOT);
+    if (!$private || !$root || str_starts_with(strtolower(str_replace('\\', '/', $private)) . '/', strtolower(str_replace('\\', '/', $root)) . '/')) {
+        throw new RuntimeException('Invoice storage must exist outside the website root.');
+    }
+    $directory = $private . '/invoices';
+    if (!is_dir($directory) && !mkdir($directory, 0700) && !is_dir($directory)) {
+        throw new RuntimeException('Cannot create invoice archive directory.');
+    }
+    $resolved = realpath($directory);
+    if (!$resolved || !str_starts_with(strtolower(str_replace('\\', '/', $resolved)) . '/', strtolower(str_replace('\\', '/', $private)) . '/')) {
+        throw new RuntimeException('Invalid invoice storage path.');
+    }
+    $number = (string) $order['order_number'];
+    if (!preg_match('/^[A-Za-z0-9-]{1,40}$/D', $number)) {
+        throw new RuntimeException('Invalid invoice number.');
+    }
+    return $resolved . '/Rechnung-' . $number . '.pdf';
+}
+
+function archive_invoice(int $id): string
+{
+    $order = query("SELECT * FROM orders WHERE id=? AND payment_status='paid' AND paid_at IS NOT NULL", [$id])->fetch();
+    if (!$order) {
+        throw new RuntimeException('Only confirmed paid orders have invoices.');
+    }
+    $path = invoice_archive_path($order);
+    $lock = fopen($path . '.lock', 'c');
+    if ($lock === false) {
+        throw new RuntimeException('Cannot lock invoice archive.');
+    }
+    $temporary = null;
+    try {
+        if (!flock($lock, LOCK_EX)) {
+            throw new RuntimeException('Cannot lock invoice archive.');
+        }
+        $existing = is_file($path) ? file_get_contents($path) : false;
+        if (is_string($existing) && str_starts_with($existing, '%PDF-1.4') && str_ends_with($existing, "%%EOF\n")) {
+            return $path;
+        }
+        $order['items'] = query('SELECT * FROM order_items WHERE order_id=? ORDER BY id', [$id])->fetchAll();
+        $pdf = invoice_pdf($order);
+        $temporary = $path . '.' . bin2hex(random_bytes(8)) . '.partial';
+        if (file_put_contents($temporary, $pdf, LOCK_EX) !== strlen($pdf)) {
+            throw new RuntimeException('Cannot write invoice archive.');
+        }
+        chmod($temporary, 0600);
+        if (!rename($temporary, $path)) {
+            throw new RuntimeException('Cannot publish invoice archive.');
+        }
+        $temporary = null;
+        app_log('invoice_archived', ['order_id' => $id]);
+        return $path;
+    } finally {
+        if ($temporary !== null && is_file($temporary)) {
+            unlink($temporary);
+        }
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
+}
+
+function ensure_invoice_archived(int $id): void
+{
+    try {
+        archive_invoice($id);
+    } catch (Throwable $error) {
+        // Payment is already committed; a later webhook/download can recover the archive.
+        app_log('invoice_archive_failed', ['order_id' => $id, 'error_class' => get_class($error)]);
+    }
+}
+
 function serve_invoice(int $id): never
 {
     try {
@@ -107,7 +182,16 @@ function serve_invoice(int $id): never
             echo 'Rechnung nicht verfügbar.';
             exit;
         }
-        $pdf = invoice_pdf($order);
+        try {
+            $path = archive_invoice($id);
+            $pdf = file_get_contents($path);
+            if (!is_string($pdf)) {
+                throw new RuntimeException('Cannot read invoice archive.');
+            }
+        } catch (Throwable $error) {
+            app_log('invoice_download_regenerated', ['order_id' => $id, 'error_class' => get_class($error)]);
+            $pdf = invoice_pdf($order);
+        }
         header('Content-Type: application/pdf');
         header('Content-Disposition: attachment; filename="Rechnung-' . preg_replace('/[^A-Za-z0-9-]/', '', $order['order_number']) . '.pdf"');
         header('Content-Length: ' . strlen($pdf));

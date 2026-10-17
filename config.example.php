@@ -22,7 +22,7 @@ return [
     ],
     'shop' => [
         // Enable only after completing legal texts, company data and payment setup.
-        'sales_enabled' => false,
+        'allow_sale' => false,
         // Plain text supplied/reviewed by the shop owner; no legal text is generated.
         'legal_notice' => '',
         'privacy_text' => '',

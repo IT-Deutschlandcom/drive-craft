@@ -5,7 +5,7 @@ function status_label(string $status): string
     return [
         'pending' => 'Zahlung ausstehend', 'paid' => 'Bezahlt', 'processing' => 'In Bearbeitung', 'printing' => 'In Fertigung',
         'shipped' => 'Versendet', 'completed' => 'Abgeschlossen', 'cancelled' => 'Storniert',
-        'expired' => 'Zahlung abgelaufen', 'refunded' => 'Erstattet', 'open' => 'Offen',
+        'expired' => 'Zahlung abgelaufen', 'failed' => 'Zahlung fehlgeschlagen', 'refunded' => 'Erstattet', 'open' => 'Offen',
         'answered' => 'Beantwortet', 'closed' => 'Geschlossen',
     ][$status] ?? $status;
 }
@@ -52,7 +52,7 @@ function render_cart(): void
 function render_summary(): void
 {
     $subtotal = cart_total();
-    $shipping = $subtotal > 0 ? (int) config('shop.shipping_cents', 490) : 0;
+    $shipping = $subtotal > 0 ? shipping_cents() : 0;
     ?>
 <div class="summary-line"><span>Artikel</span><span><?= money($subtotal) ?></span></div>
 <div class="summary-line"><span>Versand (Deutschland)</span><span><?= money($shipping) ?></span></div>
@@ -114,7 +114,7 @@ function render_tickets(): void
     $tickets = is_admin() ? admin_tickets() : user_tickets((int) current_user()['id']);
     ?>
 <section class="container pb-5"><div class="row g-4"><div class="col-lg-7"><div class="panel"><h2 class="h4">Ihre Anfragen</h2><?php if (!$tickets): ?><p class="text-muted-dc mb-0">Noch keine Anfrage. Erzählen Sie uns von Ihrer Idee!</p><?php else: ?><div class="table-responsive"><table class="table align-middle"><thead><tr><th>Betreff</th><th>Status</th><th>Datum</th></tr></thead><tbody><?php foreach ($tickets as $ticket): ?><tr><td><a href="?page=ticket&amp;id=<?= (int) $ticket['id'] ?>"><?= e($ticket['subject']) ?> ↗</a></td><td><span class="status"><?= e(status_label($ticket['status'])) ?></span></td><td><?= e($ticket['created_at']) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?></div></div>
-<div class="col-lg-5"><form method="post" class="panel" data-once><?= csrf_field() ?><input type="hidden" name="action" value="ticket_create"><h2 class="h4 mb-4">Neue Anfrage</h2><div class="mb-3"><label class="form-label" for="subject">Betreff</label><input class="form-control" id="subject" name="subject" maxlength="180" required></div><div class="mb-3"><label class="form-label" for="message">Ihre Idee oder Frage</label><textarea class="form-control" name="message" id="message" rows="6" minlength="10" maxlength="10000" required></textarea><div class="form-text">Beschreiben Sie Größe, Einsatzzweck, Farben und Wünsche. Dateiuploads werden aus Sicherheitsgründen nicht angeboten.</div></div><button class="btn btn-accent" type="submit">Anfrage senden ↗</button></form></div></div></section>
+<div class="col-lg-5"><form method="post" class="panel" data-once><?= csrf_field() ?><input type="hidden" name="action" value="ticket_create"><h2 class="h4 mb-4">Neue Anfrage</h2><div class="mb-3"><label class="form-label" for="subject">Betreff</label><input class="form-control" id="subject" name="subject" maxlength="160" required></div><div class="mb-3"><label class="form-label" for="message">Ihre Idee oder Frage</label><textarea class="form-control" name="message" id="message" rows="6" minlength="10" maxlength="10000" required></textarea><div class="form-text">Beschreiben Sie Größe, Einsatzzweck, Farben und Wünsche. Dateiuploads werden aus Sicherheitsgründen nicht angeboten.</div></div><button class="btn btn-accent" type="submit">Anfrage senden ↗</button></form></div></div></section>
 <?php
 }
 

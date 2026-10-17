@@ -57,7 +57,8 @@ function render_product(int $id): void
     ?>
 <section class="container section"><a href="?page=shop" class="text-link">← Zurück zum Shop</a><div class="row g-5 mt-1"><div class="col-md-6"><div class="product-image"><img src="<?= e($p['image']) ?>" alt="<?= e($p['name']) ?>" width="600" height="520"></div></div><div class="col-md-6"><span class="eyebrow"><?= e($p['category']) ?></span><h1 class="display-5"><?= e($p['name']) ?></h1><div class="fs-3 my-3"><?= money((int) $p['price_cents']) ?></div><p class="text-muted-dc" style="white-space:pre-line"><?= e($p['description']) ?></p>
   <p class="small text-muted-dc">Inklusive Umsatzsteuer · Versand wird im Warenkorb ausgewiesen.<br>Verfügbar: <?= (int) $p['stock'] ?> Stück</p>
-  <?php if ((int) $p['stock'] > 0): ?><form method="post" action="?page=product&amp;id=<?= $id ?>" class="mt-4">
+  <?php if (!empty($p['preview'])): ?><p class="alert alert-info">Designvorschau mit Beispielpreis. Bestellungen sind erst nach Einrichtung und Verkaufsfreigabe möglich.</p>
+  <?php elseif ((int) $p['stock'] > 0): ?><form method="post" action="?page=product&amp;id=<?= $id ?>" class="mt-4">
     <?= csrf_field() ?><input type="hidden" name="action" value="cart_add"><input type="hidden" name="product_id" value="<?= $id ?>">
     <label class="form-label" for="quantity">Menge</label><div class="d-flex gap-3"><input class="form-control" style="max-width:90px" type="number" id="quantity" name="quantity" value="1" min="1" max="<?= min(99, (int) $p['stock']) ?>" required><button class="btn btn-accent" type="submit">In den Warenkorb ↗</button></div>
   </form><?php else: ?><p class="alert alert-info">Aktuell ausverkauft. Fragen Sie uns nach einer individuellen Fertigung.</p><?php endif; ?>
@@ -99,7 +100,7 @@ function render_contact(): void
   <?= csrf_field() ?><input type="hidden" name="action" value="contact">
   <div class="mb-3"><label class="form-label" for="name">Ihr Name</label><input class="form-control" id="name" name="name" maxlength="120" required autocomplete="name"></div>
   <div class="mb-3"><label class="form-label" for="email">E-Mail-Adresse</label><input class="form-control" id="email" name="email" type="email" maxlength="190" required autocomplete="email"></div>
-  <div class="mb-3"><label class="form-label" for="subject">Betreff</label><input class="form-control" id="subject" name="subject" maxlength="180" required></div>
+  <div class="mb-3"><label class="form-label" for="subject">Betreff</label><input class="form-control" id="subject" name="subject" maxlength="160" required></div>
   <div class="mb-3"><label class="form-label" for="message">Ihre Nachricht</label><textarea class="form-control" id="message" name="message" rows="6" minlength="10" maxlength="5000" required></textarea></div>
   <div class="mb-4 form-check"><input class="form-check-input" type="checkbox" name="privacy" id="privacy" value="1" required><label class="form-check-label small" for="privacy">Ich habe die <a class="text-decoration-underline" href="?page=legal#privacy">Datenschutzhinweise</a> gelesen. Meine Angaben werden zur Bearbeitung meiner Anfrage verarbeitet.</label></div>
   <button class="btn btn-accent" type="submit">Nachricht senden ↗</button>

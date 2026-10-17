@@ -1,6 +1,6 @@
 # Drive-Craft-3D
 
-Buildfreier, deutschsprachiger Onlineshop für individuellen 3D-Druck: **PHP, HTML, CSS, JavaScript und MySQL**, ausgelegt für **Windows IIS mit FastCGI**. Kein Node.js, Composer, Framework oder Build-Schritt erforderlich. Bootstrap 5.3.8 wird als versioniertes Stylesheet mit Integritätsprüfung vom jsDelivr-CDN geladen; die eigenen JavaScript-Effekte benötigen keine Bibliothek.
+Buildfreier, deutschsprachiger Onlineshop für individuellen 3D-Druck: **PHP, HTML, CSS, JavaScript und MySQL**, ausgelegt für **Windows IIS mit FastCGI**. Kein Node.js, Composer, Framework oder Build-Schritt erforderlich. Bootstrap 5.3.8 ist als fertiges Stylesheet inklusive MIT-Lizenz lokal unter `C:\inetpub\wwwroot\drive-craft-3d\assets\vendor\bootstrap` enthalten; die eigenen JavaScript-Effekte benötigen keine Bibliothek. Schriftarten und Bilder werden ebenfalls lokal geladen.
 
 ## Funktionen
 
@@ -20,7 +20,7 @@ Die mitgelieferten Produkte, Preise und SVG-Illustrationen sind **Beispieldaten*
 - Windows Server mit IIS, CGI/FastCGI, Request Filtering und HTTPS-Zertifikat.
 - PHP **8.2 oder neuer**, passende NTS-Version für IIS; aktivierte Erweiterungen `pdo_mysql`, `curl`, `iconv`, `openssl` und Sessions.
 - MySQL **8.0 oder neuer**, InnoDB und `utf8mb4`.
-- Ausgehendes HTTPS zu `api.stripe.com`; Besucher benötigen Zugriff auf `cdn.jsdelivr.net` für Bootstrap.
+- Ausgehendes HTTPS zu `api.stripe.com` für Zahlungen; die Shopoberfläche benötigt keine externen Asset-CDNs.
 - Für den Mailversand ein in PHP/Windows eingerichteter SMTP-Relay. Es werden keine SMTP-Zugangsdaten in Quellcode oder Formularen hinterlegt.
 
 ## Installation auf IIS
@@ -60,7 +60,7 @@ Der Checkout ist standardmäßig gesperrt. Keine Platzhalterdaten als echte Unte
 
 - Unter `company` vollständige Firmierung, Inhaber, ladungsfähige Anschrift, Kontaktangaben sowie Steuernummer bzw. USt-IdNr. hinterlegen.
 - Betreiberbezogene, fachlich geprüfte Rechtstexte unter `shop.legal_notice`, `shop.privacy_text`, `shop.terms_text` und `shop.withdrawal_text` eintragen. Diese werden als Text, nicht als ungeprüftes HTML, ausgegeben.
-- Die tatsächlichen Datenschutzprozesse einschließlich Hosting, Stripe, jsDelivr, Aufbewahrung, Betroffenenrechten und Kontaktformular dokumentieren. Die mitgelieferte Anwendung ersetzt keine Rechtsberatung.
+- Die tatsächlichen Datenschutzprozesse einschließlich Hosting, Stripe, Aufbewahrung, Betroffenenrechten und Kontaktformular dokumentieren. Die mitgelieferte Anwendung ersetzt keine Rechtsberatung.
 - `shop.shipping_cents` (Vorgabe: 490 Cent) und `shop.vat_percent` (Vorgabe: 19 %) prüfen. Lieferung und Rechnungsadresse sind identisch; Versand wird ausschließlich nach Deutschland angeboten. Die Anwendung verwendet einen einheitlichen Umsatzsteuersatz, keine Kleinunternehmerregelung oder gemischten Steuersätze.
 - Produkte und Lagerbestände im Adminbereich prüfen. Eigene Bilder können beim Deployment in `C:\inetpub\wwwroot\drive-craft-3d\assets\images` abgelegt und dann ausgewählt werden. Erlaubte Namen: Buchstaben, Ziffern, Bindestrich/Unterstrich; SVG, PNG, JPG, JPEG oder WebP. Nur vertrauenswürdige eigene SVGs einsetzen.
 - Stripe im Testmodus vollständig prüfen. Anschließend reale Stripe-Schlüssel konfigurieren, `company.legal_complete` bestätigen und `shop.allow_sale` auf `true` setzen.
@@ -83,7 +83,7 @@ Für die Bestandsabstimmung lässt sich `C:\inetpub\wwwroot\drive-craft-3d\insta
 
 ### Rechnungen und Buchhaltung
 
-Nach bestätigter Zahlung stehen PDF-Rechnungen im Kundenkonto und in der Admin-Bestellübersicht bereit. Preis-, Steuer-, Kunden- und Verkäuferdaten werden bei Bestellung eingefroren. Die PDF-Funktion benötigt keine externe Bibliothek. Beide Rollen erhalten denselben Beleg.
+Nach bestätigter Zahlung werden PDF-Rechnungen automatisch im Unterverzeichnis `invoices` des privaten Verzeichnisses archiviert und stehen im Kundenkonto sowie in der Admin-Bestellübersicht bereit. Fehlende Archive werden bei einem autorisierten Download erneut erzeugt; wiederholte Webhooks erstellen keine zusätzlichen Rechnungen. Preis-, Steuer-, Kunden- und Verkäuferdaten werden bei Bestellung eingefroren. Die PDF-Funktion benötigt keine externe Bibliothek. Beide Rollen erhalten denselben Beleg; ein automatischer Rechnungsversand als E-Mail-Anhang ist nicht enthalten.
 
 Die PDFs sind **keine XRechnung/ZUGFeRD-Dateien**; Anforderungen an E-Rechnung, Leistungsdatum, Aufbewahrung und GoBD müssen für den tatsächlichen Geschäftsbetrieb geprüft werden. Erstattungen erfolgen im Stripe-Dashboard und sind separat buchhalterisch mit passenden Korrekturbelegen zu bearbeiten; eine automatische Erstattungs-/Gutschriftenverwaltung ist nicht enthalten.
 
@@ -100,13 +100,16 @@ Die PDFs sind **keine XRechnung/ZUGFeRD-Dateien**; Anforderungen an E-Rechnung, 
 
 ## Prüfungen
 
-Es ist kein Build erforderlich. PHP-Syntaxprüfung und die enthaltenen Backendprüfungen können direkt ausgeführt werden:
+Es ist kein Build erforderlich. PHP-Syntaxprüfung sowie die isolierten Backend- und Templateprüfungen können direkt ausgeführt werden:
 
 ```powershell
 Get-ChildItem C:\inetpub\wwwroot\drive-craft-3d -Filter *.php -Recurse |
     Where-Object { $_.Name -ne 'config.php' } |
     ForEach-Object { & C:\PHP\php.exe -l $_.FullName }
 C:\PHP\php.exe C:\inetpub\wwwroot\drive-craft-3d\tests\backend.php
+C:\PHP\php.exe C:\inetpub\wwwroot\drive-craft-3d\tests\frontend.php
 ```
+
+`C:\inetpub\wwwroot\drive-craft-3d\tests\integration.php` ist ausschließlich für eine separate lokale Testinstallation mit laufendem PHP-Webserver, installierter Testdatenbank, deaktiviertem Checkout und ausdrücklich gesetztem `RUN_LOCAL_INTEGRATION=1` vorgesehen. Diese Tests schreiben und entfernen Testdatensätze; niemals gegen Produktionsdaten ausführen. Sie prüfen unter anderem Anmeldung, Autorisierung, Warenkorb und simulierte signierte Stripe-Ereignisse, stellen aber keine echte Verbindung zu Stripe her.
 
 Vor Livebetrieb außerdem auf dem tatsächlichen IIS-Host prüfen: nicht autorisierte Rechnungs-/Ticketzugriffe, CSRF-Abweisung, gesperrte interne Pfade, HTTPS-Session-Cookies, Mobilansicht, Dark-/Light-Umschaltung, SMTP-Zustellung und den vollständigen Stripe-Testablauf.

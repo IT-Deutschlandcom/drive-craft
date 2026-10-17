@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/app/bootstrap.php';
 
-header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com");
+header("Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com");
 header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
 
 $page = is_string($_GET['page'] ?? null) ? $_GET['page'] : 'home';
@@ -44,7 +44,7 @@ try {
     ob_start();
     render_header($titles[$page] ?? 'Seite nicht gefunden', $page);
     if (!config('db.name')) {
-        echo '<div class="container pt-3"><div class="alert alert-info">Dieser Shop wird gerade eingerichtet. Produkte und Kundenfunktionen stehen nach der Datenbankinstallation bereit.</div></div>';
+        echo '<div class="container pt-3"><div class="alert alert-info">Dieser Shop wird gerade eingerichtet. Sie sehen unverbindliche Designvorschauen mit Beispielpreisen. Bestellungen und Kundenfunktionen sind erst nach Einrichtung verfügbar.</div></div>';
     }
     switch ($page) {
         case 'home': render_home(); break;

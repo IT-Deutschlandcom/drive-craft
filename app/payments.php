@@ -4,7 +4,7 @@ declare(strict_types=1);
 function checkout_enabled(): bool
 {
     return config('db.name') && config('db.user')
-        && config('shop.sales_enabled', config('shop.allow_sale', false)) === true
+        && config('shop.allow_sale', false) === true
         && config('company.legal_complete', false) === true
         && trim((string) config('shop.legal_notice', '')) !== ''
         && trim((string) config('shop.privacy_text', '')) !== ''
@@ -76,48 +76,48 @@ function stripe_signature_valid(string $payload, string $header, string $secret,
     return false;
 }
 
+function prepare_cart_change(): void
+{
+    synchronize_paid_cart();
+    $id = (int) ($_SESSION['checkout_order_id'] ?? 0);
+    if (!$id || empty($_SESSION['user_id'])) {
+        return;
+    }
+    $order = query('SELECT * FROM orders WHERE id=? AND user_id=?', [$id, $_SESSION['user_id']])->fetch();
+    if (!$order || $order['payment_status'] !== 'pending') {
+        unset($_SESSION['checkout_order_id']);
+        return;
+    }
+    if (!$order['stripe_session_id']) {
+        throw new DomainException('Die bestehende Zahlung wird noch geprüft. Bitte kontaktiere uns, bevor du den Warenkorb änderst.');
+    }
+    // Never return stock merely because the browser visited the cancellation URL.
+    $session = stripe_request('GET', 'checkout/sessions/' . rawurlencode($order['stripe_session_id']));
+    if (($session['status'] ?? '') === 'open') {
+        $session = stripe_request('POST', 'checkout/sessions/' . rawurlencode($order['stripe_session_id']) . '/expire');
+    }
+    if (($session['status'] ?? '') !== 'expired' || ($session['payment_status'] ?? '') === 'paid') {
+        throw new DomainException('Die bestehende Zahlung wird verarbeitet. Bitte warte auf die Zahlungsbestätigung.');
+    }
+    db()->beginTransaction();
+    try {
+        $locked = query('SELECT * FROM orders WHERE id=? FOR UPDATE', [$id])->fetch();
+        release_reservation($locked, 'expired');
+        db()->commit();
+    } catch (Throwable $error) {
+        if (db()->inTransaction()) {
+            db()->rollBack();
+        }
+        throw $error;
+    }
+    unset($_SESSION['checkout_order_id']);
+}
+
 function checkout_create(array $user, array $address): string
 {
     synchronize_paid_cart();
     if (!checkout_enabled()) {
         throw new DomainException('Online-Zahlungen sind derzeit nicht verfügbar. Bitte kontaktiere uns.');
-    }
-
-    function prepare_cart_change(): void
-    {
-        synchronize_paid_cart();
-        $id = (int) ($_SESSION['checkout_order_id'] ?? 0);
-        if (!$id || empty($_SESSION['user_id'])) {
-            return;
-        }
-        $order = query('SELECT * FROM orders WHERE id=? AND user_id=?', [$id, $_SESSION['user_id']])->fetch();
-        if (!$order || $order['payment_status'] !== 'pending') {
-            unset($_SESSION['checkout_order_id']);
-            return;
-        }
-        if (!$order['stripe_session_id']) {
-            throw new DomainException('Die bestehende Zahlung wird noch geprüft. Bitte kontaktiere uns, bevor du den Warenkorb änderst.');
-        }
-        // Never return stock merely because the browser visited the cancellation URL.
-        $session = stripe_request('GET', 'checkout/sessions/' . rawurlencode($order['stripe_session_id']));
-        if (($session['status'] ?? '') === 'open') {
-            $session = stripe_request('POST', 'checkout/sessions/' . rawurlencode($order['stripe_session_id']) . '/expire');
-        }
-        if (($session['status'] ?? '') !== 'expired' || ($session['payment_status'] ?? '') === 'paid') {
-            throw new DomainException('Die bestehende Zahlung wird verarbeitet. Bitte warte auf die Zahlungsbestätigung.');
-        }
-        db()->beginTransaction();
-        try {
-            $locked = query('SELECT * FROM orders WHERE id=? FOR UPDATE', [$id])->fetch();
-            release_reservation($locked, 'expired');
-            db()->commit();
-        } catch (Throwable $error) {
-            if (db()->inTransaction()) {
-                db()->rollBack();
-            }
-            throw $error;
-        }
-        unset($_SESSION['checkout_order_id']);
     }
     $orderId = (int) ($_SESSION['checkout_order_id'] ?? 0);
     $order = $orderId ? query("SELECT * FROM orders WHERE id=? AND user_id=? AND payment_status='pending'", [$orderId, $user['id']])->fetch() : false;
@@ -246,7 +246,11 @@ function process_stripe_event(array $event): void
     try {
         $insert = query('INSERT IGNORE INTO stripe_events (id,event_type) VALUES (?,?)', [$event['id'], $event['type']]);
         if ($insert->rowCount() === 0) {
+            $existingOrderId = query('SELECT order_id FROM stripe_events WHERE id=?', [$event['id']])->fetchColumn();
             db()->commit();
+            if ($existingOrderId && query("SELECT id FROM orders WHERE id=? AND payment_status='paid'", [$existingOrderId])->fetchColumn()) {
+                ensure_invoice_archived((int) $existingOrderId);
+            }
             return;
         }
         $id = filter_var($session['metadata']['order_id'] ?? '', FILTER_VALIDATE_INT);
@@ -278,6 +282,9 @@ function process_stripe_event(array $event): void
         }
         db()->commit();
         app_log('stripe_event_processed', ['event_id' => $event['id'], 'order_id' => $id]);
+        if (query("SELECT id FROM orders WHERE id=? AND payment_status='paid'", [$id])->fetchColumn()) {
+            ensure_invoice_archived((int) $id);
+        }
     } catch (Throwable $error) {
         if (db()->inTransaction()) {
             db()->rollBack();
