@@ -20,6 +20,24 @@ check(vat_cents(11900, 19) === 1900, 'inclusive VAT');
 check(vat_cents(100, 0) === 0, 'zero VAT');
 check(count(catalog_preview()) === 4, 'read-only seeded catalog preview');
 check(is_bool(checkout_enabled()), 'explicit checkout availability');
+$originalConfig = $GLOBALS['app_config'];
+$GLOBALS['app_config'] = [];
+check(!session_cookie_secure(), 'unconfigured HTTP preview allows session cookies');
+foreach (['http://localhost', 'http://localhost:8080/shop', 'http://127.0.0.1:8080', 'http://217.160.153.219'] as $baseUrl) {
+    $GLOBALS['app_config'] = ['app' => ['url' => $baseUrl, 'session_secure' => null]];
+    check(!session_cookie_secure(), 'HTTP session cookies for ' . $baseUrl);
+    check(url('index.php?page=account') === $baseUrl . '/index.php?page=account', 'configured HTTP navigation');
+    check(!checkout_enabled(), 'HTTP preview keeps checkout disabled');
+}
+$GLOBALS['app_config'] = ['app' => ['url' => 'https://example.invalid']];
+check(session_cookie_secure(), 'HTTPS sessions default to Secure');
+$GLOBALS['app_config']['app']['session_secure'] = null;
+check(session_cookie_secure(), 'automatic HTTPS sessions use Secure');
+$GLOBALS['app_config']['app']['session_secure'] = false;
+check(!session_cookie_secure(), 'explicit cookie setting is preserved');
+$GLOBALS['app_config'] = ['app' => ['url' => 'http://localhost', 'session_secure' => true]];
+check(session_cookie_secure(), 'explicit Secure setting is preserved on HTTP');
+$GLOBALS['app_config'] = $originalConfig;
 check(strong_password('LongPassword123!'), 'strong password');
 check(!strong_password('short123A'), 'short password rejected');
 check(!strong_password(str_repeat('A', 73)), 'bcrypt truncation avoided');
