@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 520" fill="none">
+  <defs>
+    <linearGradient id="shade" x1="190" y1="160" x2="420" y2="370" gradientUnits="userSpaceOnUse"><stop stop-color="#f4edce"/><stop offset=".5" stop-color="#d9c89b"/><stop offset="1" stop-color="#a99366"/></linearGradient>
+    <radialGradient id="glow"><stop stop-color="#f6e6a0" stop-opacity=".28"/><stop offset="1" stop-color="#e5dc97" stop-opacity="0"/></radialGradient>
+    <pattern id="layers" width="5" height="5" patternUnits="userSpaceOnUse"><path d="M0 4h5" stroke="#6b593a" stroke-opacity=".2" stroke-width=".7"/></pattern>
+    <linearGradient id="base"><stop stop-color="#525945"/><stop offset=".6" stop-color="#313629"/><stop offset="1" stop-color="#656c55"/></linearGradient>
+  </defs>
+  <ellipse cx="305" cy="290" rx="235" ry="205" fill="url(#glow)"/>
+  <ellipse cx="304" cy="442" rx="143" ry="19" fill="#000" opacity=".18"/>
+  <path d="M246 350h116l20 64c0 26-155 26-155 0z" fill="url(#base)"/>
+  <ellipse cx="304" cy="413" rx="77" ry="16" fill="#414833"/>
+  <path d="M207 150q97-52 194 0l40 180c9 64-275 64-266 0z" fill="url(#shade)"/>
+  <path d="M207 150q97-52 194 0l40 180c9 64-275 64-266 0z" fill="url(#layers)"/>
+  <g stroke="#8c774e" stroke-width="2" opacity=".4"><path d="m216 151-27 183m43-190-11 204m31-211-1 214m27-217 5 221m24-222 4 222m24-219 17 214m6-208 25 198m-4-189 32 177m-13-163 34 150"/></g>
+  <ellipse cx="304" cy="150" rx="97" ry="24" fill="#eadbb9"/>
+  <ellipse cx="304" cy="149" rx="79" ry="15" fill="#ad986f"/>
+  <ellipse cx="304" cy="150" rx="70" ry="11" fill="#252b20"/>
+  <path d="M274 411h59" stroke="#cad193" stroke-width="2" opacity=".5"/>
+</svg>
