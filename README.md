@@ -79,6 +79,8 @@ Der Checkout ist standardmäßig gesperrt. Keine Platzhalterdaten als echte Unte
 
 Ein fehlerhafter API-Aufruf gibt reservierten Bestand nicht blind frei: Bei Netzwerkfehlern könnte Stripe die Session bereits angelegt haben. Wiederholungen verwenden denselben Idempotenzschlüssel. Fehlende Webhooks im Stripe-Dashboard erneut senden.
 
+Veraltete Lagerbestandsformulare werden abgewiesen, damit eine Produktbearbeitung keine zwischenzeitlichen Reservierungen überschreibt. Bei geänderten Produktpreisen oder Versandkosten muss der Kunde die aktuelle Bestellsumme erneut prüfen; eine alte Stripe-Session darf nicht stillschweigend einen abweichenden Betrag belasten.
+
 Für die Bestandsabstimmung lässt sich `C:\inetpub\wwwroot\drive-craft-3d\install.php --reconcile` als Windows-Aufgabe ausführen. Dabei werden nur von Stripe bestätigte, abgelaufene, unbezahlte Sessions freigegeben. Unklare Sessions ohne gespeicherte Stripe-ID müssen anhand der Bestellnummer im Stripe-Dashboard und privaten Anwendungslog geprüft werden. Keine Reservierungen allein anhand eines Zeitstempels oder einer Browser-Rückleitung löschen.
 
 ### Rechnungen und Buchhaltung

@@ -113,74 +113,128 @@ function prepare_cart_change(): void
     unset($_SESSION['checkout_order_id']);
 }
 
-function checkout_create(array $user, array $address): string
+function pending_order_matches(array $order, array $address, array $cart): bool
+{
+    db()->beginTransaction();
+    try {
+        $locked = query('SELECT * FROM orders WHERE id=? FOR UPDATE', [$order['id']])->fetch();
+        $matches = $locked && $locked['payment_status'] === 'pending'
+            && (int) $locked['shipping_cents'] === shipping_cents();
+        foreach ($address as $field => $value) {
+            if (!$locked || (string) $locked[$field] !== (string) $value) {
+                $matches = false;
+            }
+        }
+        $snapshots = query('SELECT product_id,quantity,unit_price_cents FROM order_items WHERE order_id=? ORDER BY product_id', [$order['id']])->fetchAll();
+        if (!$cart || count($cart) !== count($snapshots)) {
+            $matches = false;
+        }
+        foreach ($snapshots as $snapshot) {
+            $item = query('SELECT price_cents,active FROM products WHERE id=? FOR UPDATE', [$snapshot['product_id']])->fetch();
+            if (!$item || !$item['active'] || !isset($cart[$snapshot['product_id']])
+                || (int) $cart[$snapshot['product_id']] !== (int) $snapshot['quantity']
+                || (int) $item['price_cents'] !== (int) $snapshot['unit_price_cents']) {
+                $matches = false;
+            }
+        }
+        db()->commit();
+        return $matches;
+    } catch (Throwable $error) {
+        if (db()->inTransaction()) {
+            db()->rollBack();
+        }
+        throw $error;
+    }
+}
+
+function reserve_checkout_order(array $user, array $address, array $cart, int $expectedTotal): array
+{
+    if (!$cart || count($cart) > 50) {
+        throw new DomainException('Dein Warenkorb ist leer oder zu groß.');
+    }
+    ksort($cart, SORT_NUMERIC);
+    db()->beginTransaction();
+    try {
+        $items = [];
+        $total = 0;
+        foreach ($cart as $id => $quantity) {
+            $quantity = (int) $quantity;
+            $item = query('SELECT * FROM products WHERE id=? FOR UPDATE', [(int) $id])->fetch();
+            if (!$item || !$item['active'] || $quantity < 1 || $quantity > 99 || (int) $item['stock'] < $quantity) {
+                throw new DomainException('Ein Artikel ist nicht mehr in der gewünschten Menge verfügbar.');
+            }
+            $lineTotal = (int) $item['price_cents'] * $quantity;
+            $total += $lineTotal;
+            $items[] = [$item, $quantity, $lineTotal];
+        }
+        $shipping = shipping_cents();
+        $total += $shipping;
+        if ($total < 50 || $total > 99999999) {
+            throw new DomainException('Der Bestellwert liegt außerhalb des zulässigen Bereichs.');
+        }
+        if ($total !== $expectedTotal) {
+            throw new DomainException('Preise oder Versandkosten wurden geändert. Bitte lade die Kasse neu und bestätige den aktuellen Gesamtbetrag.');
+        }
+        $vat = (float) config('shop.vat_percent', 19);
+        if ($vat < 0 || $vat > 100) {
+            throw new RuntimeException('Invalid VAT configuration.');
+        }
+        $number = 'DC-' . gmdate('Ymd') . '-' . strtoupper(bin2hex(random_bytes(5)));
+        query('INSERT INTO orders (order_number,user_id,total_cents,shipping_cents,vat_cents,vat_percent,shipping_name,address1,address2,postal_code,city,country,customer_email,seller_name,seller_address,seller_tax_id,checkout_key,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [
+            $number, $user['id'], $total, $shipping, vat_cents($total, $vat), $vat,
+            $address['shipping_name'], $address['address1'], $address['address2'], $address['postal_code'], $address['city'], $address['country'],
+            $user['email'], config('company.name', 'Drive Craft 3D'), config('company.address'),
+            implode(' / ', array_filter([(string) config('company.tax_id', ''), (string) config('company.vat_id', '')])),
+            bin2hex(random_bytes(32)), gmdate('Y-m-d H:i:s', time() + 3600),
+        ]);
+        $orderId = (int) db()->lastInsertId();
+        foreach ($items as [$item, $quantity, $lineTotal]) {
+            query('INSERT INTO order_items (order_id,product_id,name,unit_price_cents,quantity,line_total) VALUES (?,?,?,?,?,?)', [$orderId, $item['id'], $item['name'], $item['price_cents'], $quantity, $lineTotal]);
+            query('UPDATE products SET stock=stock-? WHERE id=?', [$quantity, $item['id']]);
+        }
+        db()->commit();
+        return query('SELECT * FROM orders WHERE id=?', [$orderId])->fetch();
+    } catch (Throwable $error) {
+        if (db()->inTransaction()) {
+            db()->rollBack();
+        }
+        throw $error;
+    }
+}
+
+function checkout_create(array $user, array $address, int $expectedTotal): string
 {
     synchronize_paid_cart();
     if (!checkout_enabled()) {
         throw new DomainException('Online-Zahlungen sind derzeit nicht verfügbar. Bitte kontaktiere uns.');
     }
+    $cart = (array) ($_SESSION['cart'] ?? []);
     $orderId = (int) ($_SESSION['checkout_order_id'] ?? 0);
-    $order = $orderId ? query("SELECT * FROM orders WHERE id=? AND user_id=? AND payment_status='pending'", [$orderId, $user['id']])->fetch() : false;
-    if ($order) {
-        foreach ($address as $field => $value) {
-            if ((string) $order[$field] !== (string) $value) {
-                prepare_cart_change();
-                $order = false;
-                break;
-            }
+    $order = $orderId ? query('SELECT * FROM orders WHERE id=? AND user_id=?', [$orderId, $user['id']])->fetch() : false;
+    if ($order && $order['payment_status'] !== 'pending') {
+        if ($order['payment_status'] === 'paid') {
+            synchronize_paid_cart();
+            throw new DomainException('Die bestehende Bestellung wurde bereits bezahlt. Bitte prüfe deine Bestellübersicht.');
         }
+        unset($_SESSION['checkout_order_id']);
+        $order = false;
+    }
+    if ($order && !pending_order_matches($order, $address, $cart)) {
+        prepare_cart_change();
+        $replacementState = query('SELECT payment_status,reservation_released FROM orders WHERE id=?', [$orderId])->fetch();
+        if (!$replacementState || !in_array($replacementState['payment_status'], ['expired', 'failed'], true)
+            || !(int) $replacementState['reservation_released']) {
+            throw new DomainException('Die bestehende Zahlung wird verarbeitet. Bitte prüfe deine Bestellübersicht.');
+        }
+        $cart = (array) ($_SESSION['cart'] ?? []);
+        $order = false;
     }
     if (!$order) {
-        $cart = (array) ($_SESSION['cart'] ?? []);
-        if (!$cart || count($cart) > 50) {
-            throw new DomainException('Dein Warenkorb ist leer oder zu groß.');
-        }
-        ksort($cart, SORT_NUMERIC);
-        db()->beginTransaction();
-        try {
-            $items = [];
-            $total = 0;
-            foreach ($cart as $id => $quantity) {
-                $quantity = (int) $quantity;
-                $item = query('SELECT * FROM products WHERE id=? FOR UPDATE', [(int) $id])->fetch();
-                if (!$item || !$item['active'] || $quantity < 1 || $quantity > 99 || (int) $item['stock'] < $quantity) {
-                    throw new DomainException('Ein Artikel ist nicht mehr in der gewünschten Menge verfügbar.');
-                }
-                $lineTotal = (int) $item['price_cents'] * $quantity;
-                $total += $lineTotal;
-                $items[] = [$item, $quantity, $lineTotal];
-            }
-            $shipping = shipping_cents();
-            $total += $shipping;
-            if ($total < 50 || $total > 99999999) {
-                throw new DomainException('Der Bestellwert liegt außerhalb des zulässigen Bereichs.');
-            }
-            $vat = (float) config('shop.vat_percent', 19);
-            if ($vat < 0 || $vat > 100) {
-                throw new RuntimeException('Invalid VAT configuration.');
-            }
-            $number = 'DC-' . gmdate('Ymd') . '-' . strtoupper(bin2hex(random_bytes(5)));
-            query('INSERT INTO orders (order_number,user_id,total_cents,shipping_cents,vat_cents,vat_percent,shipping_name,address1,address2,postal_code,city,country,customer_email,seller_name,seller_address,seller_tax_id,checkout_key,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [
-                $number, $user['id'], $total, $shipping, vat_cents($total, $vat), $vat,
-                $address['shipping_name'], $address['address1'], $address['address2'], $address['postal_code'], $address['city'], $address['country'],
-                $user['email'], config('company.name', 'Drive Craft 3D'), config('company.address'),
-                implode(' / ', array_filter([(string) config('company.tax_id', ''), (string) config('company.vat_id', '')])),
-                bin2hex(random_bytes(32)), gmdate('Y-m-d H:i:s', time() + 3600),
-            ]);
-            $orderId = (int) db()->lastInsertId();
-            foreach ($items as [$item, $quantity, $lineTotal]) {
-                query('INSERT INTO order_items (order_id,product_id,name,unit_price_cents,quantity,line_total) VALUES (?,?,?,?,?,?)', [$orderId, $item['id'], $item['name'], $item['price_cents'], $quantity, $lineTotal]);
-                query('UPDATE products SET stock=stock-? WHERE id=?', [$quantity, $item['id']]);
-            }
-            db()->commit();
-            $_SESSION['checkout_order_id'] = $orderId;
-            $order = query('SELECT * FROM orders WHERE id=?', [$orderId])->fetch();
-        } catch (Throwable $error) {
-            if (db()->inTransaction()) {
-                db()->rollBack();
-            }
-            throw $error;
-        }
+        $order = reserve_checkout_order($user, $address, $cart, $expectedTotal);
+        $orderId = (int) $order['id'];
+        $_SESSION['checkout_order_id'] = $orderId;
+    } elseif ((int) $order['total_cents'] !== $expectedTotal) {
+        throw new DomainException('Der angezeigte Gesamtbetrag ist nicht mehr aktuell. Bitte lade die Kasse neu.');
     }
     if (!empty($order['stripe_session_id'])) {
         $session = stripe_request('GET', 'checkout/sessions/' . rawurlencode($order['stripe_session_id']));

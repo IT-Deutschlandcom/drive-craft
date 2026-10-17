@@ -197,6 +197,10 @@ function handle_action(): never
             case 'checkout':
                 $user = require_user();
                 require_consent('terms', 'Bitte bestätige die AGB und Widerrufsbelehrung, bevor du bestellst.');
+                $expectedTotal = filter_var($_POST['expected_total_cents'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 50, 'max_range' => 99999999]]);
+                if ($expectedTotal === false || $expectedTotal === null) {
+                    throw new DomainException('Bitte lade die Kasse neu und bestätige den aktuellen Gesamtbetrag.');
+                }
                 session_rate_limit('checkout', 5, 300);
                 $address = [
                     'shipping_name' => input('shipping_name', 120), 'address1' => input('address1', 160),
@@ -206,7 +210,7 @@ function handle_action(): never
                 if (!in_array($address['country'], ['DE'], true) || !preg_match('/^[0-9]{5}$/D', $address['postal_code'])) {
                     throw new DomainException('Der Versand ist derzeit nur an gültige deutsche Adressen möglich.');
                 }
-                $target = checkout_create($user, $address);
+                $target = checkout_create($user, $address, $expectedTotal);
                 header('Location: ' . $target, true, 303);
                 exit;
             case 'ticket_create':
@@ -288,7 +292,24 @@ function handle_action(): never
                 $image = image_input();
                 $active = isset($_POST['active']) && $_POST['active'] !== '0' ? 1 : 0;
                 if ($id) {
-                    query('UPDATE products SET name=?,description=?,category=?,price_cents=?,stock=?,image=?,active=? WHERE id=?', [$name, $description, $category, $price, $stock, $image, $active, $id]);
+                    $originalStock = filter_var($_POST['original_stock'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0, 'max_range' => 1000000]]);
+                    if ($originalStock === false || $originalStock === null) {
+                        throw new DomainException('Bitte lade das Produktformular neu.');
+                    }
+                    db()->beginTransaction();
+                    try {
+                        $actualStock = query('SELECT stock FROM products WHERE id=? FOR UPDATE', [$id])->fetchColumn();
+                        if ($actualStock === false || (int) $actualStock !== $originalStock) {
+                            throw new DomainException('Der Lagerbestand wurde inzwischen verändert. Bitte lade das Produktformular neu; deine Änderungen wurden nicht gespeichert.');
+                        }
+                        query('UPDATE products SET name=?,description=?,category=?,price_cents=?,stock=?,image=?,active=? WHERE id=?', [$name, $description, $category, $price, $stock, $image, $active, $id]);
+                        db()->commit();
+                    } catch (Throwable $error) {
+                        if (db()->inTransaction()) {
+                            db()->rollBack();
+                        }
+                        throw $error;
+                    }
                 } else {
                     $slug = trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($name)), '-') ?: 'produkt';
                     $slug .= '-' . bin2hex(random_bytes(4));

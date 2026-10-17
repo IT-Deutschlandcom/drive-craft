@@ -67,7 +67,7 @@ function render_checkout(): void
     $user = current_user();
     page_intro('FAST GESCHAFFT', 'Ein Schritt näher zum Unikat.', 'Lieferung innerhalb Deutschlands. Rechnungs- und Lieferadresse sind identisch.');
     ?>
-<section class="container pb-5"><form method="post" class="row g-4" data-once><?= csrf_field() ?><input type="hidden" name="action" value="checkout">
+<section class="container pb-5"><form method="post" class="row g-4" data-once><?= csrf_field() ?><input type="hidden" name="action" value="checkout"><input type="hidden" name="expected_total_cents" value="<?= checkout_total() ?>">
   <div class="col-lg-7"><div class="panel"><h2 class="h4 mb-4">Rechnungs- &amp; Lieferadresse</h2><div class="row g-3">
     <div class="col-12"><label class="form-label" for="shipping_name">Vollständiger Name</label><input class="form-control" name="shipping_name" id="shipping_name" value="<?= e($user['name']) ?>" maxlength="120" autocomplete="name" required></div>
     <div class="col-12"><label class="form-label" for="address1">Straße und Hausnummer</label><input class="form-control" name="address1" id="address1" maxlength="160" autocomplete="address-line1" required></div>

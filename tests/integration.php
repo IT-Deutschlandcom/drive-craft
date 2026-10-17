@@ -56,32 +56,21 @@ function post_action(string $action, array $data = []): array
 $suffix = bin2hex(random_bytes(5));
 $email = 'integration-' . $suffix . '@example.invalid';
 $userId = null;
+$adminId = null;
 $orderIds = [];
 $eventIds = [];
 $initialStock = (int) query('SELECT stock FROM products WHERE id=1')->fetchColumn();
-function fixture_order(int $uid, string $suffix): array
+function fixture_order(int $uid): array
 {
     global $orderIds;
-    db()->beginTransaction();
-    try {
-        $product = query('SELECT * FROM products WHERE id=1 FOR UPDATE')->fetch();
-        $total = (int) $product['price_cents'] + shipping_cents();
-        query('INSERT INTO orders (order_number,user_id,total_cents,shipping_cents,vat_cents,vat_percent,shipping_name,address1,address2,postal_code,city,country,customer_email,seller_name,seller_address,seller_tax_id,checkout_key,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [
-            'TEST-' . $suffix, $uid, $total, shipping_cents(), vat_cents($total, 19), 19,
-            'Integration Test', 'Testweg 1', '', '10115', 'Berlin', 'DE', 'integration@example.invalid',
-            'Local Test Fixture', 'Testweg 1', 'TEST', bin2hex(random_bytes(32)), gmdate('Y-m-d H:i:s', time() + 3600),
-        ]);
-        $id = (int) db()->lastInsertId();
-        $orderIds[] = $id;
-        query('INSERT INTO order_items (order_id,product_id,name,unit_price_cents,quantity,line_total) VALUES (?,?,?,?,?,?)',
-            [$id, 1, $product['name'], $product['price_cents'], 1, $product['price_cents']]);
-        query('UPDATE products SET stock=stock-1 WHERE id=1');
-        db()->commit();
-        return query('SELECT * FROM orders WHERE id=?', [$id])->fetch();
-    } catch (Throwable $error) {
-        if (db()->inTransaction()) db()->rollBack();
-        throw $error;
-    }
+    $product = query('SELECT * FROM products WHERE id=1')->fetch();
+    $user = query('SELECT * FROM users WHERE id=?', [$uid])->fetch();
+    $order = reserve_checkout_order($user, [
+        'shipping_name' => 'Integration Test', 'address1' => 'Testweg 1', 'address2' => '',
+        'postal_code' => '10115', 'city' => 'Berlin', 'country' => 'DE',
+    ], [1 => 1], (int) $product['price_cents'] + shipping_cents());
+    $orderIds[] = (int) $order['id'];
+    return $order;
 }
 function webhook(array $order, string $type, string $payment = 'unpaid', int $amountOffset = 0, ?string $eventId = null): array
 {
@@ -121,12 +110,46 @@ try {
     verify(post_action('cart_add', ['product_id' => 1, 'quantity' => 2])['status'] === 303, 'cart add');
     verify(str_contains(request('?page=cart')['body'], 'Spiral-Lampe'), 'cart includes product');
     $count = (int) query('SELECT COUNT(*) FROM orders')->fetchColumn();
-    post_action('checkout', ['shipping_name' => 'Test', 'address1' => 'Testweg 1', 'address2' => '', 'postal_code' => '10115', 'city' => 'Berlin', 'country' => 'DE']);
+    $displayedTotal = 2 * (int) query('SELECT price_cents FROM products WHERE id=1')->fetchColumn() + shipping_cents();
+    post_action('checkout', ['expected_total_cents' => $displayedTotal, 'shipping_name' => 'Test', 'address1' => 'Testweg 1', 'address2' => '', 'postal_code' => '10115', 'city' => 'Berlin', 'country' => 'DE']);
     verify((int) query('SELECT COUNT(*) FROM orders')->fetchColumn() === $count, 'checkout consent enforced');
-    post_action('checkout', ['terms' => '1', 'shipping_name' => 'Test', 'address1' => 'Testweg 1', 'address2' => '', 'postal_code' => '10115', 'city' => 'Berlin', 'country' => 'DE']);
+    post_action('checkout', ['terms' => '1', 'expected_total_cents' => $displayedTotal, 'shipping_name' => 'Test', 'address1' => 'Testweg 1', 'address2' => '', 'postal_code' => '10115', 'city' => 'Berlin', 'country' => 'DE']);
     verify((int) query('SELECT COUNT(*) FROM orders')->fetchColumn() === $count, 'disabled Stripe never creates order');
-    $order = fixture_order($userId, $suffix . 'A');
+    $order = fixture_order($userId);
     verify((int) query('SELECT stock FROM products WHERE id=1')->fetchColumn() === $initialStock - 1, 'stock reservation');
+    $address = array_intersect_key($order, array_flip(['shipping_name', 'address1', 'address2', 'postal_code', 'city', 'country']));
+    verify(pending_order_matches($order, $address, [1 => 1]), 'unchanged pending snapshot matches');
+    verify(!pending_order_matches($order, $address, [1 => 2]), 'quantity changes invalidate pending snapshot');
+    $originalPrice = (int) query('SELECT price_cents FROM products WHERE id=1')->fetchColumn();
+    try {
+        query('UPDATE products SET price_cents=price_cents+100 WHERE id=1');
+        verify(!pending_order_matches($order, $address, [1 => 1]), 'price changes invalidate pending snapshot');
+        $beforeOrders = (int) query('SELECT COUNT(*) FROM orders')->fetchColumn();
+        try {
+            reserve_checkout_order(query('SELECT * FROM users WHERE id=?', [$userId])->fetch(), $address, [1 => 1], (int) $order['total_cents']);
+            verify(false, 'stale displayed price must be rejected');
+        } catch (DomainException) {
+            verify(true, 'stale displayed price rejected under product locks');
+        }
+        verify((int) query('SELECT COUNT(*) FROM orders')->fetchColumn() === $beforeOrders
+            && (int) query('SELECT stock FROM products WHERE id=1')->fetchColumn() === $initialStock - 1, 'stale price creates no order or stock leak');
+    } finally {
+        query('UPDATE products SET price_cents=? WHERE id=1', [$originalPrice]);
+    }
+    $originalShipping = config('shop.shipping_cents', 490);
+    try {
+        $GLOBALS['app_config']['shop']['shipping_cents'] = (int) $originalShipping + 100;
+        verify(!pending_order_matches($order, $address, [1 => 1]), 'shipping changes invalidate pending snapshot');
+        try {
+            reserve_checkout_order(query('SELECT * FROM users WHERE id=?', [$userId])->fetch(), $address, [1 => 1], (int) $order['total_cents']);
+            verify(false, 'stale displayed shipping must be rejected');
+        } catch (DomainException) {
+            verify(true, 'stale displayed shipping rejected');
+        }
+        verify((int) query('SELECT stock FROM products WHERE id=1')->fetchColumn() === $initialStock - 1, 'stale shipping does not reserve stock');
+    } finally {
+        $GLOBALS['app_config']['shop']['shipping_cents'] = $originalShipping;
+    }
     verify(request('?page=invoice&id=' . $order['id'])['status'] === 404, 'unpaid invoice blocked');
     verify(request('?page=webhook', null, ['Stripe-Signature: t=0,v1=bad'], '{}')['status'] === 400, 'invalid webhook signature rejected');
     verify(webhook($order, 'checkout.session.completed', 'paid', 1)['status'] === 500, 'amount mismatch rejected');
@@ -148,7 +171,7 @@ try {
     unlink($archivedPath);
     $regenerated = request('?page=invoice&id=' . $order['id']);
     verify($regenerated['status'] === 200 && is_file($archivedPath) && hash_file('sha256', $archivedPath) === $archiveHash, 'missing archive regenerated deterministically');
-    $expired = fixture_order($userId, $suffix . 'B');
+    $expired = fixture_order($userId);
     verify(webhook($expired, 'checkout.session.expired')['status'] === 200, 'expired webhook');
     verify((int) query('SELECT stock FROM products WHERE id=1')->fetchColumn() === $initialStock - 1, 'expired reservation restored once');
     verify(webhook($expired, 'checkout.session.expired')['status'] === 200, 'repeated expiration accepted');
@@ -163,6 +186,25 @@ try {
     $logged = post_action('login', ['email' => $email, 'password' => 'LocalTestPass123!']);
     verify(str_contains($logged['headers'], 'page=account'), 'login after logout');
     verify((int) query('SELECT COUNT(*) FROM login_throttles')->fetchColumn() >= 2, 'durable login throttles persisted');
+    post_action('logout');
+    $adminEmail = 'integration-admin-' . $suffix . '@example.invalid';
+    query("INSERT INTO users (name,email,password_hash,role) VALUES (?,?,?,'admin')", ['Local Test Admin', $adminEmail, password_hash('LocalTestPass123!', PASSWORD_DEFAULT)]);
+    $adminId = (int) db()->lastInsertId();
+    post_action('login', ['email' => $adminEmail, 'password' => 'LocalTestPass123!']);
+    verify(request('?page=admin')['status'] === 200, 'administrator authenticated');
+    $currentProduct = query('SELECT * FROM products WHERE id=1')->fetch();
+    $edit = [
+        'id' => 1, 'name' => $currentProduct['name'], 'description' => $currentProduct['description'],
+        'category' => $currentProduct['category'], 'price_cents' => $currentProduct['price_cents'],
+        'stock' => (int) $currentProduct['stock'] + 10, 'image' => $currentProduct['image'], 'active' => '1',
+    ];
+    post_action('admin_product_save', $edit + ['original_stock' => (int) $currentProduct['stock'] + 1]);
+    verify((int) query('SELECT stock FROM products WHERE id=1')->fetchColumn() === (int) $currentProduct['stock'], 'stale admin stock form cannot overwrite reserved inventory');
+    post_action('admin_product_save', $edit);
+    verify((int) query('SELECT stock FROM products WHERE id=1')->fetchColumn() === (int) $currentProduct['stock'], 'missing optimistic stock token rejected');
+    $edit['stock'] = (int) $currentProduct['stock'];
+    $saved = post_action('admin_product_save', $edit + ['original_stock' => (int) $currentProduct['stock']]);
+    verify(str_contains($saved['headers'], 'tab=products'), 'current admin stock form saves normally');
     echo "Local integration checks passed: $checks\n";
 } finally {
     foreach (array_unique($eventIds) as $id) query('DELETE FROM stripe_events WHERE id=?', [$id]);
@@ -184,5 +226,6 @@ try {
         query('DELETE FROM tickets WHERE user_id=?', [$userId]);
         query('DELETE FROM users WHERE id=?', [$userId]);
     }
+    if ($adminId) query('DELETE FROM users WHERE id=?', [$adminId]);
     curl_close($http);
 }

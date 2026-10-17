@@ -27,6 +27,7 @@ function money(int $cents): string { return number_format($cents / 100, 2, ',', 
 function cart_count(): int { return 2; }
 function cart_total(): int { return 3980; }
 function shipping_cents(): int { return 490; }
+function checkout_total(): int { return 4470; }
 function checkout_enabled(): bool { return false; }
 function products(bool $all = false): array {
     return $GLOBALS['test_empty'] ? [] : [[
@@ -99,7 +100,8 @@ capture(static fn () => render_payment_result(true));
 foreach (['dashboard', 'products', 'orders', 'gallery', 'tickets', 'users', 'contact'] as $tab) capture(static fn () => render_admin($tab, 1));
 
 $checkout = capture('render_checkout');
-foreach (['shipping_name', 'address1', 'address2', 'postal_code', 'city', 'country', 'terms', 'csrf_token'] as $field) check(str_contains($checkout, 'name="' . $field . '"'), 'Missing checkout field: ' . $field);
+foreach (['shipping_name', 'address1', 'address2', 'postal_code', 'city', 'country', 'terms', 'csrf_token', 'expected_total_cents'] as $field) check(str_contains($checkout, 'name="' . $field . '"'), 'Missing checkout field: ' . $field);
+check(str_contains(capture(static fn () => render_admin('products', 1)), 'name="original_stock" value="10"'), 'Missing inventory concurrency guard');
 check(str_contains($checkout, '44,70'), 'Shipping missing from total');
 check(str_contains(capture(static fn () => render_order(1)), 'page=invoice'), 'Paid invoice link absent');
 $GLOBALS['test_paid'] = false;
