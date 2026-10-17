@@ -17,7 +17,7 @@ Die mitgelieferten Produkte, Preise und SVG-Illustrationen sind **Beispieldaten*
 
 ## Voraussetzungen
 
-- Windows Server mit IIS, CGI/FastCGI, Request Filtering und HTTPS-Zertifikat.
+- Windows Server mit IIS, CGI/FastCGI und Request Filtering. Ein HTTPS-Zertifikat ist erst für den produktiven Betrieb erforderlich.
 - PHP **8.2 oder neuer**, passende NTS-Version für IIS; aktivierte Erweiterungen `pdo_mysql`, `curl`, `iconv`, `openssl` und Sessions.
 - MySQL **8.0 oder neuer**, InnoDB und `utf8mb4`.
 - Ausgehendes HTTPS zu `api.stripe.com` für Zahlungen; die Shopoberfläche benötigt keine externen Asset-CDNs.
@@ -27,7 +27,7 @@ Die mitgelieferten Produkte, Preise und SVG-Illustrationen sind **Beispieldaten*
 
 Die folgenden Pfade sind Beispiele für eine Installation unter `C:\inetpub\wwwroot\drive-craft-3d`.
 
-1. Repository in dieses Verzeichnis kopieren. In IIS eine Website mit diesem physischen Pfad und HTTPS-Bindung einrichten. PHP über FastCGI auf `php-cgi.exe` abbilden, z. B. `C:\PHP\php-cgi.exe`. PHP-Dateien dürfen niemals als statischer Quelltext ausgeliefert werden.
+1. Repository in dieses Verzeichnis kopieren. In IIS eine Website mit diesem physischen Pfad und vorerst einer HTTP-Bindung auf Port 80 einrichten (für `localhost` bzw. `217.160.153.219`, ohne HTTPS-Weiterleitung oder erforderliches SSL). Für den produktiven Betrieb später eine HTTPS-Bindung ergänzen. PHP über FastCGI auf `php-cgi.exe` abbilden, z. B. `C:\PHP\php-cgi.exe`. PHP-Dateien dürfen niemals als statischer Quelltext ausgeliefert werden.
 2. MySQL-Datenbank `drive_craft` und einen eigenen Datenbankbenutzer anlegen. Der Installer benötigt `CREATE`, `ALTER`, `INDEX`, `REFERENCES` sowie `SELECT`, `INSERT`, `UPDATE`, `DELETE` auf dieser Datenbank. Für den laufenden Shop anschließend möglichst auf `SELECT`, `INSERT`, `UPDATE`, `DELETE` einschränken.
 3. `C:\inetpub\wwwroot\drive-craft-3d\config.example.php` nach `C:\inetpub\wwwroot\drive-craft-3d\config.php` kopieren. Diese lokale Datei ist von Git ausgeschlossen.
 4. Datenbankverbindung, öffentliche `app.url` inklusive eventuellem Unterverzeichnis und einen zufälligen `app.key` konfigurieren. Schlüssel erzeugen:
@@ -50,9 +50,18 @@ Die folgenden Pfade sind Beispiele für eine Installation unter `C:\inetpub\wwwr
    Das Passwort benötigt 12–72 Zeichen mit Groß-/Kleinbuchstaben und einer Zahl. Es gibt **keine Standard-Zugangsdaten**. Ein erneuter Aufruf überschreibt keine vorhandenen Administrator-Zugangsdaten. Der Installer ist über HTTP grundsätzlich gesperrt.
 
 7. Prüfen, dass IIS `C:\inetpub\wwwroot\drive-craft-3d\web.config` anwendet. Sie sperrt interne Verzeichnisse, Konfiguration, Git-Dateien und Installer. Es sind **keine Rewrite-Regeln und kein URL-Rewrite-Modul** erforderlich; Navigation erfolgt über `index.php?page=…`.
-8. In PHP `display_errors=Off`, `log_errors=On` und einen privaten Fehlerlog konfigurieren. `app.session_secure` in Produktion auf `true` belassen. HTTPS erzwingen, HTTP-Bindung entsprechend absichern und Backups verschlüsselt ablegen.
+8. In PHP `display_errors=Off`, `log_errors=On` und einen privaten Fehlerlog konfigurieren. Für den produktiven Betrieb `app.url` auf die HTTPS-Adresse und `app.session_secure` auf `true` setzen, HTTPS erzwingen, HTTP-Bindung entsprechend absichern und Backups verschlüsselt ablegen.
 
 Wenn keine Datenbank konfiguriert ist, sind die öffentlichen Informationsseiten mit Einrichtungshinweis aufrufbar. Bei nicht erreichbarer oder noch nicht installierter Datenbank wird eine neutrale Wartungsseite statt interner Fehlermeldungen ausgeliefert.
+
+### Vorläufig ohne HTTPS betreiben
+
+- In `config.php` unter `app.url` für den lokalen Rechner `http://localhost` (Vorgabe) oder für den Server `http://217.160.153.219` eintragen. Bei abweichendem Port oder Unterverzeichnis diese ergänzen, z. B. `http://localhost:8080/shop`.
+- `app.session_secure` auf `null` setzen: Session-Cookies richten sich nach der **konfigurierten** URL und funktionieren damit auch über HTTP. Bei einer bestehenden Konfiguration das bisherige `true` entsprechend ersetzen. Unter HTTPS wird automatisch wieder das Secure-Attribut gesetzt; explizite Werte `true`/`false` bleiben möglich.
+- Links und Weiterleitungen verwenden `app.url`, niemals den vom Browser gelieferten Host-Header. Deshalb die zum jeweiligen Zugriff passende Adresse konfigurieren.
+- Die IIS-HTTP-Bindung muss zur Adresse passen; für externen Zugriff gegebenenfalls TCP-Port 80 in der Firewall freigeben. Die bestehenden Sperren für interne Dateien und das private Verzeichnis bleiben unverändert notwendig.
+- **Nur für vorläufige Tests mit Testdaten:** HTTP überträgt Passwörter, Session-Cookies und Formulardaten unverschlüsselt. Den Zugriff auf die Server-IP möglichst per Firewall/VPN auf vertrauenswürdige Tester begrenzen; keine echten Kunden- oder Zahlungsdaten verwenden.
+- `shop.allow_sale` bleibt `false`. Der Stripe-Checkout bleibt unter HTTP gesperrt; echte Zahlungen und öffentliche Stripe-Webhooks benötigen weiterhin HTTPS. Auch ausgehende Stripe-API-Verbindungen bleiben verschlüsselt.
 
 ## Vor dem Verkaufsstart
 

@@ -15,7 +15,7 @@ if (PHP_SAPI !== 'cli' && session_status() !== PHP_SESSION_ACTIVE) {
     session_name('drivecraft_session');
     session_set_cookie_params([
         'lifetime' => 0, 'path' => '/',
-        'secure' => (bool) config('app.session_secure', true),
+        'secure' => session_cookie_secure(),
         'httponly' => true, 'samesite' => 'Lax',
     ]);
     session_start();
@@ -41,6 +41,12 @@ function config(string $key, mixed $default = null): mixed
         $value = $value[$part];
     }
     return $value;
+}
+
+function session_cookie_secure(): bool
+{
+    return (bool) (config('app.session_secure')
+        ?? (parse_url((string) config('app.url', 'http://localhost'), PHP_URL_SCHEME) !== 'http'));
 }
 
 function db(): PDO

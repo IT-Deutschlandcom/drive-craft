@@ -4,10 +4,11 @@ declare(strict_types=1);
 return [
     'app' => [
         'name' => 'Drive Craft 3D',
-        // Public HTTPS URL, without a trailing slash; never derived from Host.
-        'url' => 'https://drive-craft-3d.de',
+        // Public URL without a trailing slash; use http://217.160.153.219 on the server.
+        'url' => 'http://localhost',
         'timezone' => 'Europe/Berlin',
-        'session_secure' => true,
+        // null follows app.url (HTTP for testing, HTTPS for production); true forces Secure.
+        'session_secure' => null,
         // Must be outside the IIS website/document root and writable by PHP.
         'private_dir' => dirname(__DIR__) . '/drive-craft-private',
         // Generate with: php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"
